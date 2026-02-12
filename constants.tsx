@@ -13,11 +13,12 @@ export const SUPPORTED_CURRENCIES: Currency[] = [
 ];
 
 export const MOCK_CB_RATES: Record<string, number> = {
-  'USD/RUB': 92.45,
-  'USD/IDR': 15840.00,
-  'RUB/IDR': 171.30,
-  'USD/THB': 35.80,
-  'USD/TRY': 32.10,
-  'USD/GEL': 2.68,
-  'EUR/USD': 1.08,
+  'USD/RUB': 91.50,
+  'USD/IDR': 16200.00,
+  'RUB/IDR': 210.00,
+  'IDR/RUB': 0.0047,
+  'USD/THB': 34.50,
+  'USD/TRY': 34.20,
+  'USD/GEL': 2.72,
+  'EUR/USD': 1.09,
 };

@@ -5,13 +5,3 @@ export interface Currency {
   symbol: string;
   flag: string;
 }
-
-export interface ExchangeRecord {
-  id: string;
-  date: string;
-  currencyPair: string;
-  amountFrom: number;
-  amountTo: number;
-  rate: number;
-  cbRateAtTime: number;
-}

@@ -5,233 +5,301 @@ import { SUPPORTED_CURRENCIES, MOCK_CB_RATES } from '../constants';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const formatNumber = (val: string | number) => {
-  if (val === undefined || val === null || val === '') return '';
-  const str = val.toString();
-  const [integer, fraction] = str.split('.');
-  const formattedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return fraction !== undefined ? `${formattedInteger}.${fraction}` : formattedInteger;
+const formatDisplay = (val: string) => {
+  if (!val) return '0';
+  if (/^\d*\.?\d*$/.test(val)) {
+    const [integer, fraction] = val.split('.');
+    const formattedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return fraction !== undefined ? `${formattedInteger}.${fraction}` : formattedInteger;
+  }
+  return val.replace(/\*/g, '×').replace(/\//g, '÷');
 };
 
-const parseNumber = (val: string) => {
-  return val.replace(/\s/g, '').replace(',', '.');
-};
+type ActiveField = 'A' | 'B' | 'USD' | 'Spread';
 
 export const CalculatorMode: React.FC = () => {
-  const [currA, setCurrA] = useState('IDR');
-  const [currB, setCurrB] = useState('RUB');
-  const [valA, setValA] = useState<string>('2 000 000');
+  const savedCurrA = localStorage.getItem('currA') || 'IDR';
+  const savedCurrB = localStorage.getItem('currB') || 'RUB';
+  const savedSpread = localStorage.getItem('spreadInput') || '';
+
+  const [currA, setCurrA] = useState(savedCurrA);
+  const [currB, setCurrB] = useState(savedCurrB);
+  
+  const [valA, setValA] = useState<string>('2000000');
   const [valB, setValB] = useState<string>('');
   const [valUSD, setValUSD] = useState<string>('');
-  const [spreadInput, setSpreadInput] = useState<string>('0.00');
+  const [spreadInput, setSpreadInput] = useState<string>(savedSpread);
+  
   const [rates, setRates] = useState<Record<string, number>>(MOCK_CB_RATES);
+  const [activeField, setActiveField] = useState<ActiveField>('A');
+
+  useEffect(() => {
+    localStorage.setItem('currA', currA);
+    localStorage.setItem('currB', currB);
+  }, [currA, currB]);
+
+  useEffect(() => {
+    localStorage.setItem('spreadInput', spreadInput);
+  }, [spreadInput]);
 
   const fetchLiveRates = async () => {
     try {
-      const prompt = `Get the absolute current exchange rates from Google Finance for: 
-      USD/RUB, RUB/IDR, IDR/RUB, USD/IDR, USD/THB, USD/TRY, USD/GEL, EUR/USD. 
-      Return the data as a simple list: PAIR: VALUE. Focus on precision.`;
+      const prompt = `Find CURRENT OFFICIAL CENTRAL BANK and MARKET exchange rates:
+      CBR (Russia) for USD/RUB, BI (Indonesia) for USD/IDR.
+      Market rates for RUB/IDR, USD/RUB, USD/IDR, USD/THB, USD/TRY, USD/GEL.
+      Format: PAIR: VALUE. Focus on IDR/RUB and RUB/IDR.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
         contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-        },
+        config: { tools: [{ googleSearch: {} }] },
       });
 
       const text = response.text || '';
       const newRates = { ...rates };
-      
-      // Flexible regex to match any currency pair pattern like XXX/YYY: 1.234 or XXX-YYY = 1.234
-      const matches = text.matchAll(/([A-Z]{3})[\/\-s]([A-Z]{3})[:\s\=]+(\d+\.?\d*)/gi);
-      let foundAny = false;
-      
-      for (const match of matches) {
-        const pair = `${match[1].toUpperCase()}/${match[2].toUpperCase()}`;
-        const rateValue = parseFloat(match[3]);
-        if (!isNaN(rateValue)) {
-          newRates[pair] = rateValue;
-          foundAny = true;
-        }
+      const matches = text.matchAll(/([A-Z]{3})[\/\-s]+([A-Z]{3})[:\s\=]+(\d+\.?\d*)/gi);
+      let found = false;
+      for (const m of matches) {
+        newRates[`${m[1].toUpperCase()}/${m[2].toUpperCase()}`] = parseFloat(m[3]);
+        found = true;
       }
-
-      if (foundAny) {
-        setRates(newRates);
-      }
-    } catch (error) {
-      console.error('Error fetching live rates:', error);
-    }
+      if (found) setRates(newRates);
+    } catch (e) { console.error(e); }
   };
 
   useEffect(() => {
     fetchLiveRates();
+    const interval = setInterval(fetchLiveRates, 600000);
+    return () => clearInterval(interval);
   }, []);
-
-  const spreadValue = useMemo(() => {
-    return parseFloat(spreadInput) || 0;
-  }, [spreadInput]);
 
   const cbRate = useMemo(() => {
     const pair = `${currA}/${currB}`;
-    const reversePair = `${currB}/${currA}`;
-    
-    // 1. Try direct match
+    const inv = `${currB}/${currA}`;
     if (rates[pair]) return rates[pair];
-    
-    // 2. Try inverse match
-    if (rates[reversePair]) return 1 / rates[reversePair];
-    
-    // 3. Try crossing via USD if both are not USD
-    if (currA !== 'USD' && currB !== 'USD') {
-      const rateA = rates[`USD/${currA}`] || (rates[`${currA}/USD`] ? 1 / rates[`${currA}/USD`] : null);
-      const rateB = rates[`USD/${currB}`] || (rates[`${currB}/USD`] ? 1 / rates[`${currB}/USD`] : null);
-      if (rateA && rateB) return rateB / rateA;
-    }
-    
-    return 1;
+    if (rates[inv]) return 1 / rates[inv];
+    const getUsd = (t: string) => t === 'USD' ? 1 : (rates[`USD/${t}`] || (rates[`${t}/USD`] ? 1 / rates[`${t}/USD`] : null));
+    const rA = getUsd(currA), rB = getUsd(currB);
+    return (rA && rB) ? rB / rA : MOCK_CB_RATES[pair] || 1;
   }, [currA, currB, rates]);
 
-  const effectiveRate = useMemo(() => {
-    return cbRate * (1 + spreadValue / 100);
-  }, [cbRate, spreadValue]);
+  const spreadVal = parseFloat(spreadInput) || 0;
+  const effectiveRate = cbRate * (1 + spreadVal / 100);
+  const usdRateA = currA === 'USD' ? 1 : (rates[`USD/${currA}`] || (rates[`${currA}/USD`] ? 1 / rates[`${currA}/USD`] : 1));
 
-  const usdRateA = useMemo(() => {
-    if (currA === 'USD') return 1;
-    return rates[`USD/${currA}`] || (rates[`${currA}/USD`] ? 1 / rates[`${currA}/USD`] : 1);
-  }, [currA, rates]);
-
-  const updateAllFromA = (v: string) => {
-    const clean = parseNumber(v);
-    setValA(clean);
-    const num = parseFloat(clean) || 0;
-    setValB((num * effectiveRate).toFixed(2));
-    setValUSD((num / usdRateA).toFixed(2));
-  };
-
-  const updateAllFromB = (v: string) => {
-    const clean = parseNumber(v);
-    setValB(clean);
-    const num = parseFloat(clean) || 0;
-    const aVal = num / effectiveRate;
-    setValA(aVal.toFixed(0));
-    setValUSD((aVal / usdRateA).toFixed(2));
-  };
-
-  const updateAllFromUSD = (v: string) => {
-    const clean = parseNumber(v);
-    setValUSD(clean);
-    const num = parseFloat(clean) || 0;
-    const aVal = num * usdRateA;
-    setValA(aVal.toFixed(0));
-    setValB((aVal * effectiveRate).toFixed(2));
-  };
-
-  useEffect(() => {
-    updateAllFromA(valA);
-  }, [effectiveRate, currA, currB]);
-
-  const handleSpreadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(',', '.');
-    if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
-      setSpreadInput(val);
+  const evaluate = (expr: string): string => {
+    try {
+      const cleaned = expr.replace(/[^-0-9+*/.]/g, '');
+      if (!cleaned) return '0';
+      const result = new Function(`return ${cleaned}`)();
+      return isFinite(result) ? result.toString() : '0';
+    } catch (e) {
+      return '0';
     }
   };
 
+  const syncAll = (val: string, field: ActiveField) => {
+    const isExpression = /[+\-*/]/.test(val);
+    const numericValue = isExpression ? parseFloat(evaluate(val)) : (parseFloat(val) || 0);
+
+    if (field === 'A') {
+      setValA(val);
+      setValB((numericValue * effectiveRate).toFixed(2));
+      setValUSD((numericValue / usdRateA).toFixed(2));
+    } else if (field === 'B') {
+      setValB(val);
+      const a = numericValue / effectiveRate;
+      setValA(a.toFixed(0));
+      setValUSD((a / usdRateA).toFixed(2));
+    } else if (field === 'USD') {
+      setValUSD(val);
+      const a = numericValue * usdRateA;
+      setValA(a.toFixed(0));
+      setValB((a * effectiveRate).toFixed(2));
+    } else if (field === 'Spread') {
+      setSpreadInput(val);
+      const currentNumericA = parseFloat(evaluate(valA)) || 0;
+      setValB((currentNumericA * effectiveRate).toFixed(2));
+      setValUSD((currentNumericA / usdRateA).toFixed(2));
+    }
+  };
+
+  useEffect(() => { 
+    const currentVal = activeField === 'A' ? valA : activeField === 'B' ? valB : activeField === 'USD' ? valUSD : spreadInput;
+    syncAll(currentVal, activeField);
+  }, [effectiveRate, currA, currB, usdRateA]);
+
+  const handleKeyPress = (key: string) => {
+    let current = '';
+    if (activeField === 'A') current = valA;
+    else if (activeField === 'B') current = valB;
+    else if (activeField === 'USD') current = valUSD;
+    else if (activeField === 'Spread') current = spreadInput;
+
+    if (key === 'BACK') {
+      current = current.slice(0, -1);
+    } else if (key === 'C') {
+      current = '';
+    } else if (key === '=') {
+      current = evaluate(current);
+    } else if (['+', '-', '*', '/'].includes(key)) {
+      if (current === '' && key !== '-') return;
+      if (['+', '-', '*', '/'].includes(current.slice(-1))) {
+        current = current.slice(0, -1) + key;
+      } else {
+        current += key;
+      }
+    } else if (key === '.') {
+      const segments = current.split(/[+\-*/]/);
+      const lastSegment = segments[segments.length - 1];
+      if (!lastSegment.includes('.')) current += '.';
+    } else if (key === '000') {
+      const segments = current.split(/[+\-*/]/);
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment !== '' && lastSegment !== '0') current += '000';
+    } else {
+      const segments = current.split(/[+\-*/]/);
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment === '0' && key !== '.') current = current.slice(0, -1) + key;
+      else current += key;
+    }
+    syncAll(current, activeField);
+  };
+
+  const invEffectiveRate = useMemo(() => effectiveRate !== 0 ? 1 / effectiveRate : 0, [effectiveRate]);
+  const displaySpread = spreadInput === '' ? '0' : spreadInput;
+
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-500 font-sf">
-      {/* Main Input Cards */}
-      <div className="bg-white rounded-[32px] p-4 shadow-[0_4px_24px_rgba(0,0,0,0.04)] border border-slate-100/50 space-y-3 mt-4">
-        <InputBlock 
-          value={valA} 
-          onChange={updateAllFromA} 
-          currency={currA} 
-          onCurrencyChange={setCurrA}
-          subText={`1 ${currA} = ${effectiveRate.toFixed(4)} ${currB}`}
+    <div className="flex flex-col h-full space-y-3 overflow-hidden">
+      {/* bank card rate Control - At Top */}
+      <div 
+        onClick={() => setActiveField('Spread')}
+        className={`bg-white rounded-2xl p-3 flex items-center justify-between shadow-[0_4px_12px_rgba(0,0,0,0.03)] transition-all cursor-pointer flex-shrink-0 ${activeField === 'Spread' ? 'bg-slate-50 ring-2 ring-slate-900/20' : ''}`}
+      >
+        <div className="flex items-center gap-1">
+          <span className={`text-base font-normal transition-colors ${activeField === 'Spread' ? 'text-slate-900' : 'text-slate-900'}`}>{spreadInput || '0'}</span>
+          <span className="text-slate-300 font-normal">%</span>
+        </div>
+        <span className="text-[10px] font-normal text-slate-400 uppercase tracking-widest text-right">bank card rate</span>
+      </div>
+
+      {/* Inputs Section */}
+      <div className="space-y-2 flex-shrink-0">
+        <InputRow 
+          label={currA} value={valA} active={activeField === 'A'} 
+          onClick={() => setActiveField('A')} sub={`1 ${currA} = ${effectiveRate.toFixed(4)} ${currB} (incl ${displaySpread}%)`}
+          onCurrencyChange={setCurrA} currentCurrency={currA}
         />
-        <InputBlock 
-          value={valB} 
-          onChange={updateAllFromB} 
-          currency={currB} 
-          onCurrencyChange={setCurrB}
-          subText={`1 ${currB} = ${(1 / effectiveRate).toFixed(4)} ${currA}`}
+        <InputRow 
+          label={currB} value={valB} active={activeField === 'B'} 
+          onClick={() => setActiveField('B')} sub={`1 ${currB} = ${invEffectiveRate.toFixed(4)} ${currA} (incl ${displaySpread}%)`}
+          onCurrencyChange={setCurrB} currentCurrency={currB}
         />
-        <InputBlock 
-          value={valUSD} 
-          onChange={updateAllFromUSD} 
-          currency="USD" 
-          isSpecial
-          readOnlyCurrency
-          subText={`1 USD = ${usdRateA.toFixed(2)} ${currA}`}
+        <InputRow 
+          label="USD" value={valUSD} active={activeField === 'USD'} 
+          onClick={() => setActiveField('USD')} sub={`1 USD = ${usdRateA.toFixed(2)} ${currA}`}
+          readOnly 
         />
       </div>
 
-      {/* Editable Rate Markup Display */}
-      <div className="bg-white rounded-3xl p-5 border border-slate-100/50 shadow-[0_4px_24px_rgba(0,0,0,0.04)] flex flex-col items-center">
-        <span className="text-[10px] font-medium text-slate-400 uppercase tracking-[0.1em] mb-2">Card Rate Markup</span>
-        <div className="flex items-center justify-center gap-2">
-          <div className="relative">
-            <input 
-              type="text" 
-              inputMode="decimal"
-              value={spreadInput}
-              onChange={handleSpreadChange}
-              className="bg-[#F2F2F7] text-xl font-medium text-slate-900 focus:outline-none w-24 px-4 py-2.5 rounded-2xl text-center border-2 border-transparent focus:border-[#007AFF]/20 transition-all"
-              placeholder="0.00"
-            />
+      {/* Calculator Keypad */}
+      <div className="flex-grow grid grid-cols-4 gap-2.5 pb-4">
+        {/* Row 1 - Utilities at top */}
+        <Key val="C" onClick={handleKeyPress} variant="utility" />
+        <Key val="BACK" onClick={handleKeyPress} variant="utility" span="col-span-2" icon={
+          <div className="flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 002-2h-8.172a2 2 0 00-1.414.586L3 12z" />
+            </svg>
+            <span className="text-sm font-normal">Delete</span>
           </div>
-          <span className="text-xl font-medium text-slate-300">%</span>
-        </div>
+        } />
+        <Key val="/" label="÷" onClick={handleKeyPress} variant="operator" />
+        
+        {/* Row 2 */}
+        <Key val="7" onClick={handleKeyPress} />
+        <Key val="8" onClick={handleKeyPress} />
+        <Key val="9" onClick={handleKeyPress} />
+        <Key val="*" label="×" onClick={handleKeyPress} variant="operator" />
+        
+        {/* Row 3 */}
+        <Key val="4" onClick={handleKeyPress} />
+        <Key val="5" onClick={handleKeyPress} />
+        <Key val="6" onClick={handleKeyPress} />
+        <Key val="-" label="-" onClick={handleKeyPress} variant="operator" />
+        
+        {/* Row 4 */}
+        <Key val="1" onClick={handleKeyPress} />
+        <Key val="2" onClick={handleKeyPress} />
+        <Key val="3" onClick={handleKeyPress} />
+        <Key val="+" label="+" onClick={handleKeyPress} variant="operator" />
+        
+        {/* Row 5 */}
+        <Key val="." onClick={handleKeyPress} />
+        <Key val="0" onClick={handleKeyPress} />
+        <Key val="000" onClick={handleKeyPress} />
+        <Key val="=" onClick={handleKeyPress} variant="primary" />
       </div>
     </div>
   );
 };
 
-const InputBlock = ({ value, onChange, currency, onCurrencyChange, isSpecial, readOnlyCurrency, subText }: any) => {
-  const currObj = SUPPORTED_CURRENCIES.find(c => c.code === currency);
+interface KeyProps {
+  val: string;
+  label?: string;
+  onClick: (v: string) => void;
+  variant?: 'number' | 'operator' | 'utility' | 'primary';
+  span?: string;
+  icon?: React.ReactNode;
+}
+
+const Key = ({ val, label, onClick, variant = 'number', span, icon }: KeyProps) => {
+  const styles = {
+    number: "bg-white text-slate-900 shadow-[0_2px_0_0_#e2e8f0] active:shadow-none active:translate-y-[1px]",
+    operator: "bg-slate-100 text-slate-600 shadow-[0_2px_0_0_#cbd5e1] active:shadow-none active:translate-y-[1px]",
+    utility: "bg-slate-50 text-slate-500 shadow-[0_2px_0_0_#cbd5e1] active:shadow-none active:translate-y-[1px]",
+    primary: "bg-slate-900 text-white shadow-[0_2px_0_0_#000000] active:shadow-none active:translate-y-[1px]",
+  };
+
+  return (
+    <button
+      onClick={() => onClick(val)}
+      className={`${span || 'col-span-1'} flex items-center justify-center text-[20px] font-normal rounded-2xl transition-all active:scale-[0.98] ${styles[variant]}`}
+    >
+      {icon || label || val}
+    </button>
+  );
+};
+
+const InputRow = ({ label, value, active, onClick, sub, onCurrencyChange, currentCurrency, readOnly }: any) => {
+  const flag = SUPPORTED_CURRENCIES.find(c => c.code === currentCurrency)?.flag || '🇺🇸';
   
   return (
-    <div className={`rounded-2xl px-4 py-3.5 ${isSpecial ? 'bg-[#F2F2F7]' : 'bg-[#F9F9FB]'} flex items-center justify-between min-h-[80px] transition-colors border border-transparent`}>
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <input 
-          type="text" 
-          inputMode="decimal"
-          value={formatNumber(value)}
-          onChange={(e) => {
-            const clean = parseNumber(e.target.value);
-            if (/^\d*\.?\d*$/.test(clean) || clean === '') {
-              onChange(clean);
-            }
-          }}
-          className="bg-transparent text-2xl font-medium text-slate-900 focus:outline-none w-full truncate tracking-tight"
-          placeholder="0"
-        />
-        {subText && (
-          <span className="text-[10px] text-slate-400 mt-1 font-medium uppercase tracking-tight opacity-90">
-            {subText}
-          </span>
-        )}
+    <div 
+      onClick={onClick}
+      className={`relative px-4 py-3 rounded-2xl flex items-center justify-between transition-all cursor-pointer shadow-[0_4px_12px_rgba(0,0,0,0.03)] ${active ? 'bg-slate-50 ring-2 ring-slate-900/20' : 'bg-white'}`}
+    >
+      <div className="flex flex-col overflow-hidden">
+        <span className={`text-[21px] font-normal truncate transition-colors ${active ? 'text-slate-900' : 'text-slate-900'}`}>
+          {formatDisplay(value)}
+        </span>
+        <span className="text-[10px] text-slate-400 uppercase font-normal tracking-tight mt-0.5 opacity-80">
+          {sub}
+        </span>
       </div>
-      
-      <div className="relative ml-4 flex-shrink-0">
-        <div className="flex items-center justify-between gap-1.5 bg-white px-3 py-2 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-slate-100 w-[96px] h-[44px]">
-          <span className="text-xl flex-shrink-0 leading-none">{currObj?.flag || '🏳️'}</span>
-          <span className="font-medium text-slate-800 text-[14px] flex-1 text-center">{currency}</span>
-          {!readOnlyCurrency && (
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
-            </svg>
-          )}
+
+      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+        <div className={`px-2.5 py-2 rounded-xl flex items-center gap-1.5 min-w-[70px] justify-center shadow-sm transition-colors ${active ? 'bg-slate-200/50' : 'bg-slate-50'}`}>
+          <span className="text-lg leading-none">{readOnly ? '🇺🇸' : flag}</span>
+          <span className="text-[13px] font-normal text-slate-800">{label}</span>
         </div>
-        {!readOnlyCurrency && (
+        {!readOnly && (
           <select 
-            value={currency} 
+            className="absolute right-0 opacity-0 w-24 h-full cursor-pointer"
+            value={currentCurrency}
             onChange={(e) => onCurrencyChange(e.target.value)}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           >
-            {SUPPORTED_CURRENCIES.map(c => (
-              <option key={c.code} value={c.code}>{c.code}</option>
-            ))}
+            {SUPPORTED_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
           </select>
         )}
       </div>
