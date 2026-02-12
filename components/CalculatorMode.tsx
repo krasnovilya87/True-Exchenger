@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { SUPPORTED_CURRENCIES, MOCK_CB_RATES } from '../constants';
@@ -50,7 +49,7 @@ export const CalculatorMode: React.FC = () => {
       Format: PAIR: VALUE. Focus on IDR/RUB and RUB/IDR.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: prompt,
         config: { tools: [{ googleSearch: {} }] },
       });
@@ -178,40 +177,39 @@ export const CalculatorMode: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-3 overflow-hidden">
-      {/* bank card rate Control - At Top */}
+      {/* bank card rate Control */}
       <div 
         onClick={() => setActiveField('Spread')}
-        className={`bg-white rounded-2xl p-3 flex items-center justify-between shadow-[0_4px_12px_rgba(0,0,0,0.03)] transition-all cursor-pointer flex-shrink-0 ${activeField === 'Spread' ? 'bg-slate-50 ring-2 ring-slate-900/20' : ''}`}
+        className={`bg-white rounded-2xl p-4 flex items-center justify-between shadow-[0_4px_12px_rgba(0,0,0,0.03)] transition-all cursor-pointer flex-shrink-0 ${activeField === 'Spread' ? 'bg-slate-50 ring-2 ring-slate-900/20' : ''}`}
       >
-        <div className="flex items-center gap-1">
-          <span className={`text-base font-normal transition-colors ${activeField === 'Spread' ? 'text-slate-900' : 'text-slate-900'}`}>{spreadInput || '0'}</span>
-          <span className="text-slate-300 font-normal">%</span>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[20px] font-normal transition-colors ${activeField === 'Spread' ? 'text-slate-900' : 'text-slate-900'}`}>{spreadInput || '0'}</span>
+          <span className="text-slate-400 font-normal text-md">%</span>
         </div>
-        <span className="text-[10px] font-normal text-slate-400 uppercase tracking-widest text-right">bank card rate</span>
+        <span className="text-[12px] font-normal text-slate-400 uppercase tracking-widest text-right">bank card rate</span>
       </div>
 
       {/* Inputs Section */}
-      <div className="space-y-2 flex-shrink-0">
+      <div className="space-y-3 flex-shrink-0">
         <InputRow 
-          label={currA} value={valA} active={activeField === 'A'} 
+          label={currA} value={valA} active={activeField === 'A'} size="large"
           onClick={() => setActiveField('A')} sub={`1 ${currA} = ${effectiveRate.toFixed(4)} ${currB} (incl ${displaySpread}%)`}
           onCurrencyChange={setCurrA} currentCurrency={currA}
         />
         <InputRow 
-          label={currB} value={valB} active={activeField === 'B'} 
+          label={currB} value={valB} active={activeField === 'B'} size="large"
           onClick={() => setActiveField('B')} sub={`1 ${currB} = ${invEffectiveRate.toFixed(4)} ${currA} (incl ${displaySpread}%)`}
           onCurrencyChange={setCurrB} currentCurrency={currB}
         />
         <InputRow 
-          label="USD" value={valUSD} active={activeField === 'USD'} 
+          label="USD" value={valUSD} active={activeField === 'USD'} size="small"
           onClick={() => setActiveField('USD')} sub={`1 USD = ${usdRateA.toFixed(2)} ${currA}`}
           readOnly 
         />
       </div>
 
       {/* Calculator Keypad */}
-      <div className="flex-grow grid grid-cols-4 gap-2 pb-2">
-        {/* Row 1 */}
+      <div className="flex-grow grid grid-cols-4 gap-2 pb-2 max-h-[40%]">
         <Key val="C" onClick={handleKeyPress} variant="clear" />
         <Key val="BACK" onClick={handleKeyPress} variant="utility" icon={
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -221,25 +219,21 @@ export const CalculatorMode: React.FC = () => {
         <Key val="%" onClick={handleKeyPress} variant="utility" />
         <Key val="/" label="÷" onClick={handleKeyPress} variant="operator" />
         
-        {/* Row 2 */}
         <Key val="7" onClick={handleKeyPress} />
         <Key val="8" onClick={handleKeyPress} />
         <Key val="9" onClick={handleKeyPress} />
         <Key val="*" label="×" onClick={handleKeyPress} variant="operator" />
         
-        {/* Row 3 */}
         <Key val="4" onClick={handleKeyPress} />
         <Key val="5" onClick={handleKeyPress} />
         <Key val="6" onClick={handleKeyPress} />
         <Key val="-" label="-" onClick={handleKeyPress} variant="operator" />
         
-        {/* Row 4 */}
         <Key val="1" onClick={handleKeyPress} />
         <Key val="2" onClick={handleKeyPress} />
         <Key val="3" onClick={handleKeyPress} />
         <Key val="+" label="+" onClick={handleKeyPress} variant="operator" />
         
-        {/* Row 5 */}
         <Key val="." onClick={handleKeyPress} />
         <Key val="0" onClick={handleKeyPress} />
         <Key val="000" onClick={handleKeyPress} />
@@ -270,40 +264,53 @@ const Key = ({ val, label, onClick, variant = 'number', span, icon }: KeyProps) 
   return (
     <button
       onClick={() => onClick(val)}
-      className={`${span || 'col-span-1'} flex items-center justify-center text-[19px] font-normal rounded-2xl transition-all active:scale-[0.98] ${styles[variant]}`}
+      className={`${span || 'col-span-1'} flex items-center justify-center text-[17px] font-normal rounded-2xl transition-all active:scale-[0.98] ${styles[variant]} py-2`}
     >
       {icon || label || val}
     </button>
   );
 };
 
-const InputRow = ({ label, value, active, onClick, sub, onCurrencyChange, currentCurrency, readOnly }: any) => {
+interface InputRowProps {
+  label: string;
+  value: string;
+  active: boolean;
+  onClick: () => void;
+  sub: string;
+  onCurrencyChange?: (v: string) => void;
+  currentCurrency?: string;
+  readOnly?: boolean;
+  size?: 'small' | 'large';
+}
+
+const InputRow = ({ label, value, active, onClick, sub, onCurrencyChange, currentCurrency, readOnly, size = 'small' }: InputRowProps) => {
   const flag = SUPPORTED_CURRENCIES.find(c => c.code === currentCurrency)?.flag || '🇺🇸';
+  const isLarge = size === 'large';
   
   return (
     <div 
       onClick={onClick}
-      className={`relative px-4 py-3 rounded-2xl flex items-center justify-between transition-all cursor-pointer shadow-[0_4px_12px_rgba(0,0,0,0.03)] ${active ? 'bg-slate-50 ring-2 ring-slate-900/20' : 'bg-white'}`}
+      className={`relative px-5 transition-all cursor-pointer shadow-[0_4px_12px_rgba(0,0,0,0.03)] rounded-2xl flex items-center justify-between ${isLarge ? 'py-5' : 'py-3'} ${active ? 'bg-slate-50 ring-2 ring-slate-900/20' : 'bg-white'}`}
     >
-      <div className="flex flex-col overflow-hidden">
-        <span className={`text-[26px] font-normal truncate transition-colors ${active ? 'text-slate-900' : 'text-slate-900'}`}>
+      <div className="flex flex-col overflow-hidden max-w-[65%]">
+        <span className={`font-normal truncate transition-colors leading-tight ${isLarge ? 'text-[34px]' : 'text-[24px]'} ${active ? 'text-slate-900' : 'text-slate-900'}`}>
           {formatDisplay(value)}
         </span>
-        <span className="text-[10px] text-slate-400 uppercase font-normal tracking-tight mt-0.5 opacity-80">
+        <span className="text-[10px] text-slate-400 uppercase font-normal tracking-tight mt-1 opacity-80 leading-tight">
           {sub}
         </span>
       </div>
 
-      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-        <div className={`px-2.5 py-2 rounded-xl flex items-center gap-1.5 min-w-[70px] justify-center shadow-sm transition-colors ${active ? 'bg-slate-200/50' : 'bg-slate-50'}`}>
-          <span className="text-lg leading-none">{readOnly ? '🇺🇸' : flag}</span>
-          <span className="text-[13px] font-normal text-slate-800">{label}</span>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <div className={`rounded-xl flex items-center gap-1.5 justify-center shadow-sm transition-colors ${active ? 'bg-slate-200/50' : 'bg-slate-50'} ${isLarge ? 'px-3 py-2.5 min-w-[85px]' : 'px-2 py-2 min-w-[75px]'}`}>
+          <span className={`${isLarge ? 'text-xl' : 'text-lg'} leading-none`}>{readOnly ? '🇺🇸' : flag}</span>
+          <span className={`font-normal text-slate-800 leading-none ${isLarge ? 'text-[20px]' : 'text-[16px]'}`}>{label}</span>
         </div>
         {!readOnly && (
           <select 
             className="absolute right-0 opacity-0 w-24 h-full cursor-pointer"
             value={currentCurrency}
-            onChange={(e) => onCurrencyChange(e.target.value)}
+            onChange={(e) => onCurrencyChange?.(e.target.value)}
           >
             {SUPPORTED_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
           </select>
