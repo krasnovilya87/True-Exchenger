@@ -142,6 +142,13 @@ export const CalculatorMode: React.FC = () => {
       current = '';
     } else if (key === '=') {
       current = evaluate(current);
+    } else if (key === '%') {
+      const segments = current.split(/[+\-*/]/);
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment !== '') {
+        const val = parseFloat(lastSegment) / 100;
+        current = current.slice(0, -lastSegment.length) + val.toString();
+      }
     } else if (['+', '-', '*', '/'].includes(key)) {
       if (current === '' && key !== '-') return;
       if (['+', '-', '*', '/'].includes(current.slice(-1))) {
@@ -203,17 +210,15 @@ export const CalculatorMode: React.FC = () => {
       </div>
 
       {/* Calculator Keypad */}
-      <div className="flex-grow grid grid-cols-4 gap-2.5 pb-4">
-        {/* Row 1 - Utilities at top */}
-        <Key val="C" onClick={handleKeyPress} variant="utility" />
-        <Key val="BACK" onClick={handleKeyPress} variant="utility" span="col-span-2" icon={
-          <div className="flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 002-2h-8.172a2 2 0 00-1.414.586L3 12z" />
-            </svg>
-            <span className="text-sm font-normal">Delete</span>
-          </div>
+      <div className="flex-grow grid grid-cols-4 gap-2 pb-2">
+        {/* Row 1 */}
+        <Key val="C" onClick={handleKeyPress} variant="clear" />
+        <Key val="BACK" onClick={handleKeyPress} variant="utility" icon={
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 002-2h-8.172a2 2 0 00-1.414.586L3 12z" />
+          </svg>
         } />
+        <Key val="%" onClick={handleKeyPress} variant="utility" />
         <Key val="/" label="÷" onClick={handleKeyPress} variant="operator" />
         
         {/* Row 2 */}
@@ -238,7 +243,7 @@ export const CalculatorMode: React.FC = () => {
         <Key val="." onClick={handleKeyPress} />
         <Key val="0" onClick={handleKeyPress} />
         <Key val="000" onClick={handleKeyPress} />
-        <Key val="=" onClick={handleKeyPress} variant="primary" />
+        <Key val="=" onClick={handleKeyPress} variant="operator" />
       </div>
     </div>
   );
@@ -248,7 +253,7 @@ interface KeyProps {
   val: string;
   label?: string;
   onClick: (v: string) => void;
-  variant?: 'number' | 'operator' | 'utility' | 'primary';
+  variant?: 'number' | 'operator' | 'utility' | 'clear' | 'primary';
   span?: string;
   icon?: React.ReactNode;
 }
@@ -258,13 +263,14 @@ const Key = ({ val, label, onClick, variant = 'number', span, icon }: KeyProps) 
     number: "bg-white text-slate-900 shadow-[0_2px_0_0_#e2e8f0] active:shadow-none active:translate-y-[1px]",
     operator: "bg-slate-100 text-slate-600 shadow-[0_2px_0_0_#cbd5e1] active:shadow-none active:translate-y-[1px]",
     utility: "bg-slate-50 text-slate-500 shadow-[0_2px_0_0_#cbd5e1] active:shadow-none active:translate-y-[1px]",
+    clear: "bg-slate-200 text-slate-600 shadow-[0_2px_0_0_#cbd5e1] active:shadow-none active:translate-y-[1px]",
     primary: "bg-slate-900 text-white shadow-[0_2px_0_0_#000000] active:shadow-none active:translate-y-[1px]",
   };
 
   return (
     <button
       onClick={() => onClick(val)}
-      className={`${span || 'col-span-1'} flex items-center justify-center text-[20px] font-normal rounded-2xl transition-all active:scale-[0.98] ${styles[variant]}`}
+      className={`${span || 'col-span-1'} flex items-center justify-center text-[19px] font-normal rounded-2xl transition-all active:scale-[0.98] ${styles[variant]}`}
     >
       {icon || label || val}
     </button>
@@ -280,7 +286,7 @@ const InputRow = ({ label, value, active, onClick, sub, onCurrencyChange, curren
       className={`relative px-4 py-3 rounded-2xl flex items-center justify-between transition-all cursor-pointer shadow-[0_4px_12px_rgba(0,0,0,0.03)] ${active ? 'bg-slate-50 ring-2 ring-slate-900/20' : 'bg-white'}`}
     >
       <div className="flex flex-col overflow-hidden">
-        <span className={`text-[21px] font-normal truncate transition-colors ${active ? 'text-slate-900' : 'text-slate-900'}`}>
+        <span className={`text-[26px] font-normal truncate transition-colors ${active ? 'text-slate-900' : 'text-slate-900'}`}>
           {formatDisplay(value)}
         </span>
         <span className="text-[10px] text-slate-400 uppercase font-normal tracking-tight mt-0.5 opacity-80">
