@@ -32,7 +32,6 @@ export const CalculatorMode: React.FC = () => {
   
   const [rates, setRates] = useState<Record<string, number>>(MOCK_CB_RATES);
   const [activeField, setActiveField] = useState<ActiveField>('A');
-  // Устанавливаем в true изначально, чтобы первый ввод при запуске очищал значение
   const [isNewEntry, setIsNewEntry] = useState<boolean>(true);
 
   useEffect(() => {
@@ -44,7 +43,6 @@ export const CalculatorMode: React.FC = () => {
     localStorage.setItem('spreadInput', spreadInput);
   }, [spreadInput]);
 
-  // Обработчик выбора поля
   const handleSelectField = (field: ActiveField) => {
     setActiveField(field);
     setIsNewEntry(true);
@@ -52,35 +50,42 @@ export const CalculatorMode: React.FC = () => {
 
   const fetchLiveRates = useCallback(async () => {
     try {
-      const prompt = `Act as a currency expert. Search Google Finance (google.com/finance) for the LATEST REAL-TIME exchange rates today.
-      Provide the current official value for these specific pairs:
-      - USD/${currA}
-      - USD/${currB}
-      - ${currA}/${currB}
-      - USD/RUB, USD/IDR, USD/THB, USD/TRY, USD/GEL, EUR/USD, GBP/USD.
+      // Улучшенный промпт для максимальной точности
+      const prompt = `SEARCH Google Finance (google.com/finance) for the ABSOLUTE LATEST real-time exchange rates as of ${new Date().toUTCString()}.
+      Focus on these pairs: USD/${currA}, USD/${currB}, ${currA}/${currB}, USD/RUB, USD/IDR, USD/THB, USD/GEL, USD/TRY, EUR/USD.
       
-      CRITICAL: You MUST provide the full numeric value from Google Finance. If USD/IDR is 16,834.98, write "USD/IDR: 16834.98".
-      DO NOT truncate thousands. DO NOT use commas as thousands separators.
-      Format exactly: "PAIR: VALUE" (e.g. "USD/IDR: 16834.98").`;
+      RULES:
+      1. Use only real-time data from Google Finance.
+      2. Return ONLY a list in format "CODE/CODE: VALUE".
+      3. Use DOT as decimal separator (e.g., 16845.50). 
+      4. DO NOT use commas for thousands.
+      5. Provide values for all major pairs requested.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt,
-        config: { tools: [{ googleSearch: {} }] },
+        config: { 
+          tools: [{ googleSearch: {} }],
+          temperature: 0.1 // Снижаем креативность для точности данных
+        },
       });
 
       const text = response.text || '';
       const newRates: Record<string, number> = {};
       
-      const matches = text.matchAll(/([A-Z]{3})[\/\-s]*([A-Z]{3})[:\s\=]+([\d\s,]+\.?\d*)/gi);
+      // Более надежный парсинг чисел и кодов
+      const matches = text.matchAll(/([A-Z]{3})[\/\s-]*([A-Z]{3})[:\s=]+([\d\s,]+\.?\d*)/gi);
       
       let foundCount = 0;
       for (const m of matches) {
-        let rawVal = m[3].replace(/\s/g, ''); 
+        let rawVal = m[3].trim().replace(/\s/g, ''); 
+        
+        // Обработка европейского/американского формата чисел
         if (rawVal.includes(',') && rawVal.includes('.')) {
           rawVal = rawVal.replace(/,/g, '');
         } else if (rawVal.includes(',')) {
           const parts = rawVal.split(',');
+          // Если после запятой 3 знака - это скорее всего разделитель тысяч
           if (parts[parts.length-1].length === 3) {
             rawVal = rawVal.replace(/,/g, '');
           } else {
@@ -106,7 +111,7 @@ export const CalculatorMode: React.FC = () => {
 
   useEffect(() => {
     fetchLiveRates();
-    const interval = setInterval(fetchLiveRates, 600000);
+    const interval = setInterval(fetchLiveRates, 300000); // Обновляем чаще (каждые 5 мин)
     return () => clearInterval(interval);
   }, [fetchLiveRates]);
 
@@ -193,14 +198,11 @@ export const CalculatorMode: React.FC = () => {
     else if (activeField === 'USD') current = valUSD;
     else if (activeField === 'Spread') current = spreadInput;
 
-    // Логика нового ввода: если поле только что выбрано и нажата цифра/точка/000
     if (isNewEntry) {
-      // Если это не управляющая клавиша и не оператор, очищаем поле перед вводом
       if (!['BACK', 'C', '=', '+', '-', '*', '/', '%'].includes(key)) {
         current = '';
         setIsNewEntry(false);
       } else if (['+', '-', '*', '/', '%'].includes(key)) {
-        // Если нажат оператор, мы продолжаем работу с текущим значением
         setIsNewEntry(false);
       }
     }
