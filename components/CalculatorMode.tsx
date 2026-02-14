@@ -32,8 +32,8 @@ export const CalculatorMode: React.FC = () => {
   
   const [rates, setRates] = useState<Record<string, number>>(MOCK_CB_RATES);
   const [activeField, setActiveField] = useState<ActiveField>('A');
-  // Состояние для отслеживания начала нового ввода после смены фокуса
-  const [isNewEntry, setIsNewEntry] = useState<boolean>(false);
+  // Устанавливаем в true изначально, чтобы первый ввод при запуске очищал значение
+  const [isNewEntry, setIsNewEntry] = useState<boolean>(true);
 
   useEffect(() => {
     localStorage.setItem('currA', currA);
@@ -193,12 +193,15 @@ export const CalculatorMode: React.FC = () => {
     else if (activeField === 'USD') current = valUSD;
     else if (activeField === 'Spread') current = spreadInput;
 
-    // Логика нового ввода: если поле только что выбрано и нажата цифра/точка
+    // Логика нового ввода: если поле только что выбрано и нажата цифра/точка/000
     if (isNewEntry) {
-      setIsNewEntry(false);
-      // Если это не управляющая клавиша и не оператор, очищаем поле
+      // Если это не управляющая клавиша и не оператор, очищаем поле перед вводом
       if (!['BACK', 'C', '=', '+', '-', '*', '/', '%'].includes(key)) {
         current = '';
+        setIsNewEntry(false);
+      } else if (['+', '-', '*', '/', '%'].includes(key)) {
+        // Если нажат оператор, мы продолжаем работу с текущим значением
+        setIsNewEntry(false);
       }
     }
 
