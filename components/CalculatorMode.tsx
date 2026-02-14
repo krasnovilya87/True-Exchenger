@@ -32,6 +32,8 @@ export const CalculatorMode: React.FC = () => {
   
   const [rates, setRates] = useState<Record<string, number>>(MOCK_CB_RATES);
   const [activeField, setActiveField] = useState<ActiveField>('A');
+  // Состояние для отслеживания начала нового ввода после смены фокуса
+  const [isNewEntry, setIsNewEntry] = useState<boolean>(false);
 
   useEffect(() => {
     localStorage.setItem('currA', currA);
@@ -41,6 +43,12 @@ export const CalculatorMode: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('spreadInput', spreadInput);
   }, [spreadInput]);
+
+  // Обработчик выбора поля
+  const handleSelectField = (field: ActiveField) => {
+    setActiveField(field);
+    setIsNewEntry(true);
+  };
 
   const fetchLiveRates = useCallback(async () => {
     try {
@@ -64,19 +72,15 @@ export const CalculatorMode: React.FC = () => {
       const text = response.text || '';
       const newRates: Record<string, number> = {};
       
-      // Robust regex: Find PAIR: VALUE. Handle digits, dots, and potential separators.
       const matches = text.matchAll(/([A-Z]{3})[\/\-s]*([A-Z]{3})[:\s\=]+([\d\s,]+\.?\d*)/gi);
       
       let foundCount = 0;
       for (const m of matches) {
-        let rawVal = m[3].replace(/\s/g, ''); // Remove spaces
-        
-        // Remove commas only if they are thousands separators (European vs US formats)
+        let rawVal = m[3].replace(/\s/g, ''); 
         if (rawVal.includes(',') && rawVal.includes('.')) {
           rawVal = rawVal.replace(/,/g, '');
         } else if (rawVal.includes(',')) {
           const parts = rawVal.split(',');
-          // If followed by 3 digits, likely a thousands separator (e.g., 16,834)
           if (parts[parts.length-1].length === 3) {
             rawVal = rawVal.replace(/,/g, '');
           } else {
@@ -102,7 +106,7 @@ export const CalculatorMode: React.FC = () => {
 
   useEffect(() => {
     fetchLiveRates();
-    const interval = setInterval(fetchLiveRates, 600000); // Refetch every 10 mins
+    const interval = setInterval(fetchLiveRates, 600000);
     return () => clearInterval(interval);
   }, [fetchLiveRates]);
 
@@ -189,6 +193,15 @@ export const CalculatorMode: React.FC = () => {
     else if (activeField === 'USD') current = valUSD;
     else if (activeField === 'Spread') current = spreadInput;
 
+    // Логика нового ввода: если поле только что выбрано и нажата цифра/точка
+    if (isNewEntry) {
+      setIsNewEntry(false);
+      // Если это не управляющая клавиша и не оператор, очищаем поле
+      if (!['BACK', 'C', '=', '+', '-', '*', '/', '%'].includes(key)) {
+        current = '';
+      }
+    }
+
     if (key === 'BACK') {
       current = current.slice(0, -1);
     } else if (key === 'C') {
@@ -233,7 +246,7 @@ export const CalculatorMode: React.FC = () => {
     <div className="flex flex-col h-full space-y-3 overflow-hidden">
       {/* bank card rate Control */}
       <div 
-        onClick={() => setActiveField('Spread')}
+        onClick={() => handleSelectField('Spread')}
         className={`bg-white rounded-2xl p-4 flex items-center justify-between shadow-[0_4px_12px_rgba(0,0,0,0.03)] transition-all cursor-pointer flex-shrink-0 ${activeField === 'Spread' ? 'bg-slate-50 ring-2 ring-slate-900/20' : ''}`}
       >
         <div className="flex items-center gap-1.5">
@@ -247,17 +260,17 @@ export const CalculatorMode: React.FC = () => {
       <div className="space-y-3 flex-shrink-0">
         <InputRow 
           label={currA} value={valA} active={activeField === 'A'} size="large"
-          onClick={() => setActiveField('A')} sub={`1 ${currA} = ${effectiveRate.toFixed(4)} ${currB} (incl ${displaySpread}%)`}
+          onClick={() => handleSelectField('A')} sub={`1 ${currA} = ${effectiveRate.toFixed(4)} ${currB} (incl ${displaySpread}%)`}
           onCurrencyChange={setCurrA} currentCurrency={currA}
         />
         <InputRow 
           label={currB} value={valB} active={activeField === 'B'} size="large"
-          onClick={() => setActiveField('B')} sub={`1 ${currB} = ${invEffectiveRate.toFixed(4)} ${currA} (incl ${displaySpread}%)`}
+          onClick={() => handleSelectField('B')} sub={`1 ${currB} = ${invEffectiveRate.toFixed(4)} ${currA} (incl ${displaySpread}%)`}
           onCurrencyChange={setCurrB} currentCurrency={currB}
         />
         <InputRow 
           label="USD" value={valUSD} active={activeField === 'USD'} size="small"
-          onClick={() => setActiveField('USD')} sub={`1 USD = ${usdRateA.toFixed(2)} ${currA}`}
+          onClick={() => handleSelectField('USD')} sub={`1 USD = ${usdRateA.toFixed(2)} ${currA}`}
           readOnly 
         />
       </div>
