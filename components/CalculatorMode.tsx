@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { SUPPORTED_CURRENCIES, MOCK_CB_RATES } from '../constants';
 
@@ -41,12 +42,18 @@ export const CalculatorMode: React.FC = () => {
     localStorage.setItem('spreadInput', spreadInput);
   }, [spreadInput]);
 
-  const fetchLiveRates = async () => {
+  const fetchLiveRates = useCallback(async () => {
     try {
-      const prompt = `Find CURRENT OFFICIAL CENTRAL BANK and MARKET exchange rates:
-      CBR (Russia) for USD/RUB, BI (Indonesia) for USD/IDR.
-      Market rates for RUB/IDR, USD/RUB, USD/IDR, USD/THB, USD/TRY, USD/GEL.
-      Format: PAIR: VALUE. Focus on IDR/RUB and RUB/IDR.`;
+      const prompt = `Act as a currency expert. Search Google Finance (google.com/finance) for the LATEST REAL-TIME exchange rates today.
+      Provide the current official value for these specific pairs:
+      - USD/${currA}
+      - USD/${currB}
+      - ${currA}/${currB}
+      - USD/RUB, USD/IDR, USD/THB, USD/TRY, USD/GEL, EUR/USD, GBP/USD.
+      
+      CRITICAL: You MUST provide the full numeric value from Google Finance. If USD/IDR is 16,834.98, write "USD/IDR: 16834.98".
+      DO NOT truncate thousands. DO NOT use commas as thousands separators.
+      Format exactly: "PAIR: VALUE" (e.g. "USD/IDR: 16834.98").`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -55,36 +62,83 @@ export const CalculatorMode: React.FC = () => {
       });
 
       const text = response.text || '';
-      const newRates = { ...rates };
-      const matches = text.matchAll(/([A-Z]{3})[\/\-s]+([A-Z]{3})[:\s\=]+(\d+\.?\d*)/gi);
-      let found = false;
+      const newRates: Record<string, number> = {};
+      
+      // Robust regex: Find PAIR: VALUE. Handle digits, dots, and potential separators.
+      const matches = text.matchAll(/([A-Z]{3})[\/\-s]*([A-Z]{3})[:\s\=]+([\d\s,]+\.?\d*)/gi);
+      
+      let foundCount = 0;
       for (const m of matches) {
-        newRates[`${m[1].toUpperCase()}/${m[2].toUpperCase()}`] = parseFloat(m[3]);
-        found = true;
+        let rawVal = m[3].replace(/\s/g, ''); // Remove spaces
+        
+        // Remove commas only if they are thousands separators (European vs US formats)
+        if (rawVal.includes(',') && rawVal.includes('.')) {
+          rawVal = rawVal.replace(/,/g, '');
+        } else if (rawVal.includes(',')) {
+          const parts = rawVal.split(',');
+          // If followed by 3 digits, likely a thousands separator (e.g., 16,834)
+          if (parts[parts.length-1].length === 3) {
+            rawVal = rawVal.replace(/,/g, '');
+          } else {
+            rawVal = rawVal.replace(/,/g, '.');
+          }
+        }
+        
+        const parsedValue = parseFloat(rawVal);
+        if (!isNaN(parsedValue) && parsedValue > 0) {
+          const key = `${m[1].toUpperCase()}/${m[2].toUpperCase()}`;
+          newRates[key] = parsedValue;
+          foundCount++;
+        }
       }
-      if (found) setRates(newRates);
-    } catch (e) { console.error(e); }
-  };
+      
+      if (foundCount > 0) {
+        setRates(prev => ({ ...prev, ...newRates }));
+      }
+    } catch (e) {
+      console.error("Error fetching live rates:", e);
+    }
+  }, [currA, currB]);
 
   useEffect(() => {
     fetchLiveRates();
-    const interval = setInterval(fetchLiveRates, 600000);
+    const interval = setInterval(fetchLiveRates, 600000); // Refetch every 10 mins
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchLiveRates]);
 
   const cbRate = useMemo(() => {
     const pair = `${currA}/${currB}`;
     const inv = `${currB}/${currA}`;
     if (rates[pair]) return rates[pair];
     if (rates[inv]) return 1 / rates[inv];
-    const getUsd = (t: string) => t === 'USD' ? 1 : (rates[`USD/${t}`] || (rates[`${t}/USD`] ? 1 / rates[`${t}/USD`] : null));
-    const rA = getUsd(currA), rB = getUsd(currB);
-    return (rA && rB) ? rB / rA : MOCK_CB_RATES[pair] || 1;
+    
+    const getUsd = (t: string) => {
+      if (t === 'USD') return 1;
+      const direct = rates[`USD/${t}`];
+      if (direct) return direct;
+      const inverted = rates[`${t}/USD`];
+      if (inverted) return 1 / inverted;
+      return MOCK_CB_RATES[`USD/${t}`] || null;
+    };
+    
+    const rA = getUsd(currA);
+    const rB = getUsd(currB);
+    
+    if (rA && rB) return rB / rA;
+    return MOCK_CB_RATES[pair] || 1;
   }, [currA, currB, rates]);
 
   const spreadVal = parseFloat(spreadInput) || 0;
   const effectiveRate = cbRate * (1 + spreadVal / 100);
-  const usdRateA = currA === 'USD' ? 1 : (rates[`USD/${currA}`] || (rates[`${currA}/USD`] ? 1 / rates[`${currA}/USD`] : 1));
+  
+  const usdRateA = useMemo(() => {
+    if (currA === 'USD') return 1;
+    const direct = rates[`USD/${currA}`];
+    if (direct) return direct;
+    const inverted = rates[`${currA}/USD`];
+    if (inverted) return 1 / inverted;
+    return MOCK_CB_RATES[`USD/${currA}`] || 1;
+  }, [currA, rates]);
 
   const evaluate = (expr: string): string => {
     try {
@@ -97,7 +151,7 @@ export const CalculatorMode: React.FC = () => {
     }
   };
 
-  const syncAll = (val: string, field: ActiveField) => {
+  const syncAll = useCallback((val: string, field: ActiveField) => {
     const isExpression = /[+\-*/]/.test(val);
     const numericValue = isExpression ? parseFloat(evaluate(val)) : (parseFloat(val) || 0);
 
@@ -121,12 +175,12 @@ export const CalculatorMode: React.FC = () => {
       setValB((currentNumericA * effectiveRate).toFixed(2));
       setValUSD((currentNumericA / usdRateA).toFixed(2));
     }
-  };
+  }, [effectiveRate, usdRateA, valA]);
 
   useEffect(() => { 
     const currentVal = activeField === 'A' ? valA : activeField === 'B' ? valB : activeField === 'USD' ? valUSD : spreadInput;
     syncAll(currentVal, activeField);
-  }, [effectiveRate, currA, currB, usdRateA]);
+  }, [effectiveRate, currA, currB, usdRateA, syncAll, activeField]);
 
   const handleKeyPress = (key: string) => {
     let current = '';
