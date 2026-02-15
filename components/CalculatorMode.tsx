@@ -32,6 +32,7 @@ export const CalculatorMode: React.FC = () => {
   const savedCurrB = localStorage.getItem('currB') || 'RUB';
   const savedSpread = localStorage.getItem('spreadInput') || '0';
   const savedHistory = JSON.parse(localStorage.getItem('exchangeHistory') || '[]');
+  const savedRates = JSON.parse(localStorage.getItem('cachedRates') || 'null');
 
   const [currA, setCurrA] = useState(savedCurrA);
   const [currB, setCurrB] = useState(savedCurrB);
@@ -44,8 +45,9 @@ export const CalculatorMode: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>(savedHistory);
   const [showHistory, setShowHistory] = useState(false);
   const [isCalcMode, setIsCalcMode] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
-  const [rates, setRates] = useState<Record<string, number>>(MOCK_CB_RATES);
+  const [rates, setRates] = useState<Record<string, number>>(savedRates || MOCK_CB_RATES);
   const [activeField, setActiveField] = useState<ActiveField>('A');
   const [isNewEntry, setIsNewEntry] = useState<boolean>(true);
 
@@ -68,15 +70,22 @@ export const CalculatorMode: React.FC = () => {
     localStorage.setItem('exchangeHistory', JSON.stringify(history));
   }, [history]);
 
+  useEffect(() => {
+    localStorage.setItem('cachedRates', JSON.stringify(rates));
+  }, [rates]);
+
   const handleSelectField = (field: ActiveField) => {
     setActiveField(field);
     setIsNewEntry(true);
   };
 
   const fetchLiveRates = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
     try {
-      const prompt = `Search google.com/finance for LIVE rates: USD/${currA}, USD/${currB}, ${currA}/${currB}, USD/RUB, USD/IDR, USD/THB. 
-      Output ONLY format "PAIR: VALUE" (use dots, no commas). Timestamp: ${Date.now()}`;
+      const prompt = `Find live exchange rates for: USD/${currA}, USD/${currB}, ${currA}/${currB}.
+      Output strictly in this format "PAIR: RATE" using decimals. 
+      Example: "USD/EUR: 0.95". Use google search to get current prices.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -89,41 +98,37 @@ export const CalculatorMode: React.FC = () => {
 
       const text = response.text || '';
       const newRates: Record<string, number> = {};
-      const matches = text.matchAll(/([A-Z]{3})[\/\s-]*([A-Z]{3})[:\s=]+([\d\s,]+\.?\d*)/gi);
+      const matches = text.matchAll(/([A-Z]{3})\s*[\/\-]\s*([A-Z]{3})\s*[:=]\s*([\d\s,]+\.?\d*)/gi);
       
       let foundCount = 0;
       for (const m of matches) {
-        let rawVal = m[3].trim().replace(/\s/g, ''); 
-        if (rawVal.includes(',') && rawVal.includes('.')) {
-          rawVal = rawVal.replace(/,/g, '');
-        } else if (rawVal.includes(',')) {
-          const parts = rawVal.split(',');
-          if (parts[parts.length-1].length === 3) rawVal = rawVal.replace(/,/g, '');
-          else rawVal = rawVal.replace(/,/g, '.');
-        }
-        
+        let rawVal = m[3].trim().replace(/\s/g, '').replace(/,/g, '.');
         const parsedValue = parseFloat(rawVal);
         if (!isNaN(parsedValue) && parsedValue > 0) {
           newRates[`${m[1].toUpperCase()}/${m[2].toUpperCase()}`] = parsedValue;
           foundCount++;
         }
       }
-      if (foundCount > 0) setRates(prev => ({ ...prev, ...newRates }));
+
+      if (foundCount > 0) {
+        setRates(prev => ({ ...prev, ...newRates }));
+      }
     } catch (e) {
-      console.error("Error fetching live rates:", e);
+      console.warn("Failed to update rates via Search. Using cached/mock rates.", e);
+    } finally {
+      setIsRefreshing(false);
     }
+  }, [currA, currB, isRefreshing]);
+
+  // Initial fetch and on currency change
+  useEffect(() => {
+    fetchLiveRates();
   }, [currA, currB]);
 
+  // Regular periodic updates (every 5 mins)
   useEffect(() => {
-    const initialTimer = setTimeout(() => {
-      fetchLiveRates();
-    }, 1);
-
     const interval = setInterval(fetchLiveRates, 300000);
-    return () => {
-      clearTimeout(initialTimer);
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, [fetchLiveRates]);
 
   const cbRate = useMemo(() => {
@@ -254,10 +259,8 @@ export const CalculatorMode: React.FC = () => {
     const fromVal = evaluate(valA);
     const toVal = evaluate(valB);
     
-    // Don't save if values are zero or empty
     if (parseFloat(fromVal) === 0 || parseFloat(toVal) === 0 || !fromVal || !toVal) return;
 
-    // Don't save if it's identical to the last item
     if (history.length > 0) {
       const last = history[0];
       if (last.fromVal === fromVal && last.toVal === toVal && last.fromCurr === currA && last.toCurr === currB) return;
@@ -275,7 +278,6 @@ export const CalculatorMode: React.FC = () => {
     setHistory(prev => [newItem, ...prev].slice(0, 50));
   }, [valA, valB, currA, currB, spreadInput, history]);
 
-  // Save on close/unload
   useEffect(() => {
     const handleUnload = () => {
       const { valA, valB, currA, currB, spreadInput } = stateRef.current;
@@ -321,11 +323,10 @@ export const CalculatorMode: React.FC = () => {
     if (key === 'BACK') {
         current = current.slice(0, -1);
     } else if (key === 'C') {
-        saveToHistory(); // Save before clearing
+        saveToHistory();
         current = '';
     } else if (key === '=') {
         current = evaluate(current);
-        // We evaluate first, then save next tick to ensure state updates
         setTimeout(saveToHistory, 0); 
     } else if (key === '%') {
       const segments = current.split(/[+\-*/]/);
@@ -368,7 +369,10 @@ export const CalculatorMode: React.FC = () => {
           <span className="text-slate-400 font-normal text-md">%</span>
         </div>
         <div className="flex flex-col items-end">
-          <span className="text-[12px] font-normal text-slate-400 uppercase tracking-widest text-right">bank fee</span>
+          <div className="flex items-center gap-2">
+            {isRefreshing && <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />}
+            <span className="text-[12px] font-normal text-slate-400 uppercase tracking-widest text-right">bank fee</span>
+          </div>
           <div className="flex items-center gap-4 mt-2">
             <button 
               onClick={handleCalcToggle}
@@ -394,7 +398,7 @@ export const CalculatorMode: React.FC = () => {
         />
         <InputRow 
           label="USD" value={valUSD} active={activeField === 'USD'} size="small"
-          onClick={() => handleSelectField('USD')} sub={`1 USD = ${(usdRateA / spreadMultiplier).toFixed(2)} ${currA} (incl ${displaySpread}%)`}
+          onClick={() => handleSelectField('USD')} sub={`1 USD = ${(usdRateA / (1 + (parseFloat(spreadInput)||0)/100)).toFixed(2)} ${currA} (incl ${displaySpread}%)`}
           readOnly 
         />
       </div>
