@@ -359,6 +359,16 @@ export const CalculatorMode: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-3 overflow-hidden relative font-normal">
+      {/* Main App Header with Indicator */}
+      <header className="pt-6 pb-2 flex items-center justify-center gap-2 flex-shrink-0">
+        {isRefreshing && (
+          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
+        )}
+        <h1 className="text-[12px] font-normal tracking-[0.4em] text-slate-400 uppercase">
+          True Currency
+        </h1>
+      </header>
+
       {/* Spread/Bank Fee Header */}
       <div 
         onClick={() => handleSelectField('Spread')}
@@ -370,7 +380,6 @@ export const CalculatorMode: React.FC = () => {
         </div>
         <div className="flex flex-col items-end">
           <div className="flex items-center gap-2">
-            {isRefreshing && <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />}
             <span className="text-[12px] font-normal text-slate-400 uppercase tracking-widest text-right">bank fee</span>
           </div>
           <div className="flex items-center gap-4 mt-2">
